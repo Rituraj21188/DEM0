@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Site Map Viewer — Ortho / DSM</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --panel-bg: #1b1f24;
+    --panel-border: #2c333b;
+    --text: #e8ecef;
+    --muted: #8b95a1;
+    --accent: #3fa7d6;
+  }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); }
+  #map { position: absolute; inset: 0; background: #11151a; }
+
+  .app-title {
+    position: absolute; top: 14px; left: 14px; z-index: 1000;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    letter-spacing: 0.02em; box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+  }
+  .app-title span { color: var(--muted); font-weight: 400; font-size: 12px; display: block; }
+
+  .leaflet-control-layers {
+    background: var(--panel-bg) !important;
+    border: 1px solid var(--panel-border) !important;
+    color: var(--text) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.4) !important;
+  }
+  .leaflet-control-layers-separator { border-top: 1px solid var(--panel-border) !important; }
+  .leaflet-control-layers label { font-size: 13px; }
+
+  .opacity-panel {
+    position: absolute; bottom: 20px; left: 14px; z-index: 1000;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+    font-size: 12px; width: 190px;
+  }
+  .opacity-panel label { display: block; color: var(--muted); margin-bottom: 4px; }
+  .opacity-panel input[type=range] { width: 100%; accent-color: var(--accent); }
+
+  .legend {
+    position: absolute; bottom: 20px; right: 14px; z-index: 1000;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+    font-size: 12px;
+  }
+  .legend div { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .legend .swatch { width: 14px; height: 3px; border-radius: 2px; }
+  .legend .swatch.point { width: 10px; height: 10px; border-radius: 50%; }
+
+  .label-tag {
+    background: rgba(20, 24, 28, 0.85); color: #fff; padding: 1px 6px;
+    border-radius: 4px; font-size: 11px; border: 1px solid rgba(255,255,255,0.15);
+    white-space: nowrap;
+  }
+  .leaflet-tooltip.label-tag::before { display: none; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="app-title">
+  Site Map Viewer
+  <span>Orthomosaic · DSM · Annotations</span>
+</div>
+
+<div class="opacity-panel" id="opacityPanel" style="display:none;">
+  <label id="opacityLabel">Layer opacity</label>
+  <input type="range" id="opacitySlider" min="0" max="1" step="0.05" value="1">
+</div>
+
+<div class="legend">
+  <div><span class="swatch" style="background:#e05a4e;"></span> Road</div>
+  <div><span class="swatch point" style="background:#3fa7d6;"></span> Structure</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ---------------------------------------------------------------------
+// CONFIG — point these at your own tiles/data once generated (see README)
+// ---------------------------------------------------------------------
+const SITE_CENTER = [27.0603, 94.8661];   // [lat, lon] — set to your DSM's center
+const SITE_ZOOM = 19;
+
+const TILE_PATHS = {
+  ortho: "tiles/ortho_3857.tif/{z}/{x}/{y}.png",
+  dsm:   "dsm:   "tiles/dsm/{z}/{x}/{y}.png"   // confirm this folder name matches your tiles\ folder exactly
+};
+const GEOJSON_PATHS = {
+  roads: "data/roads-sample.geojson",
+  structures: "data/structures-sample.geojson"
+};
+// ---------------------------------------------------------------------
+
+const map = L.map('map', { zoomControl: true }).setView(SITE_CENTER, SITE_ZOOM);
+
+// Always-available fallback so the map isn't blank before tiles exist
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 22
+}).addTo(map);
+
+// Site raster layers — swapped in as base layers once tiles/... exists
+const orthoLayer = L.tileLayer(TILE_PATHS.ortho, { maxZoom: 22, maxNativeZoom: 22, tms: true });
+const dsmLayer    = L.tileLayer(TILE_PATHS.dsm,   { maxZoom: 22, maxNativeZoom: 22, tms: true, opacity: 0.85 });
+
+const baseLayers = {
+  "OpenStreetMap (fallback)": osm,
+  "Orthomosaic": orthoLayer,
+  "DSM (surface model)": dsmLayer
+};
+
+// --- Annotation layers: roads and structures, both labeled ---
+const roadsLayer = L.geoJSON(null, {
+  style: { color: "#e05a4e", weight: 3 },
+  onEachFeature: (feature, layer) => {
+    if (feature.properties && feature.properties.name) {
+      layer.bindTooltip(feature.properties.name, {
+        permanent: true, direction: "center", className: "label-tag"
+      });
+      layer.bindPopup(`<b>${feature.properties.name}</b><br>${feature.properties.type || ""}`);
+    }
+  }
+});
+
+const structuresLayer = L.geoJSON(null, {
+  pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+    radius: 6, fillColor: "#3fa7d6", color: "#fff", weight: 1, fillOpacity: 0.9
+  }),
+  style: { color: "#3fa7d6", weight: 2, fillOpacity: 0.15 },
+  onEachFeature: (feature, layer) => {
+    if (feature.properties && feature.properties.name) {
+      layer.bindTooltip(feature.properties.name, {
+        permanent: true, direction: "top", className: "label-tag"
+      });
+      layer.bindPopup(`<b>${feature.properties.name}</b><br>${feature.properties.type || ""}`);
+    }
+  }
+});
+
+fetch(GEOJSON_PATHS.roads).then(r => r.json()).then(d => roadsLayer.addData(d)).catch(() => {});
+fetch(GEOJSON_PATHS.structures).then(r => r.json()).then(d => structuresLayer.addData(d)).catch(() => {});
+
+roadsLayer.addTo(map);
+structuresLayer.addTo(map);
+
+const overlays = {
+  "Roads": roadsLayer,
+  "Structures": structuresLayer
+};
+
+L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
+L.control.scale({ imperial: false }).addTo(map);
+
+// --- Opacity slider for whichever elevation layer is active ---
+const opacityPanel = document.getElementById('opacityPanel');
+const opacityLabel = document.getElementById('opacityLabel');
+const opacitySlider = document.getElementById('opacitySlider');
+
+function wireOpacity(layer, label) {
+  opacityPanel.style.display = 'block';
+  opacityLabel.textContent = label + ' opacity';
+  opacitySlider.value = layer.options.opacity ?? 1;
+  opacitySlider.oninput = () => layer.setOpacity(parseFloat(opacitySlider.value));
+}
+
+map.on('baselayerchange', (e) => {
+  if (e.name === "DSM (surface model)") wireOpacity(dsmLayer, "DSM");
+  else opacityPanel.style.display = 'none';
+});
+</script>
+</body>
+</html>
