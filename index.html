@@ -5,41 +5,137 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Point Cloud Viewer</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #0f1117; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-    canvas { display: block; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #0d1117;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
     #ui {
       position: absolute;
-      top: 16px;
-      left: 16px;
+      top: 20px;
+      left: 20px;
       z-index: 10;
-      background: rgba(20, 24, 33, 0.85);
-      backdrop-filter: blur(8px);
-      padding: 12px 18px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: #fff;
+      background: rgba(22, 27, 34, 0.88);
+      backdrop-filter: blur(12px);
+      padding: 16px 20px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #e6edf3;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      min-width: 200px;
     }
-    #loading {
+    #ui h3 {
+      margin: 0 0 14px 0;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #58a6ff;
+    }
+    .control-group {
+      margin-bottom: 12px;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .control-group label {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    input[type=range] {
+      width: 110px;
+      accent-color: #58a6ff;
+      cursor: pointer;
+    }
+    select, button {
+      background: #21262d;
+      color: #c9d1d9;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    select:hover, button:hover {
+      background: #30363d;
+      border-color: #58a6ff;
+    }
+    button {
+      width: 100%;
+      margin-top: 6px;
+      font-weight: 500;
+      color: #58a6ff;
+    }
+    #loading-container {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      font-size: 16px;
-      color: #00d2ff;
-      letter-spacing: 1px;
+      text-align: center;
+      color: #58a6ff;
+      font-size: 15px;
+      letter-spacing: 0.5px;
     }
-    .control-group { margin-top: 8px; font-size: 13px; }
-    input[type=range] { width: 120px; vertical-align: middle; }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      margin: 0 auto 12px auto;
+      border: 3px solid rgba(88, 166, 255, 0.2);
+      border-top: 3px solid #58a6ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
-  <div id="loading">Loading Point Cloud...</div>
-  
+
+  <!-- Loading State -->
+  <div id="loading-container">
+    <div class="spinner"></div>
+    <div id="loading-text">Loading Point Cloud...</div>
+  </div>
+
+  <!-- Interactive Controls UI -->
   <div id="ui">
-    <div style="font-weight: 600; font-size: 14px;">Point Cloud Settings</div>
+    <h3>Viewer Controls</h3>
+    
     <div class="control-group">
-      <label>Size: <input type="range" id="size-slider" min="0.005" max="0.1" step="0.005" value="0.02"></label>
+      <span>Point Size</span>
+      <input type="range" id="size-slider" min="0.005" max="0.1" step="0.005" value="0.02">
     </div>
+
+    <div class="control-group">
+      <label for="toggle-rotate">
+        <input type="checkbox" id="toggle-rotate"> Auto-Rotate
+      </label>
+    </div>
+
+    <div class="control-group">
+      <span>Background</span>
+      <select id="bg-select">
+        <option value="dark">Dark</option>
+        <option value="slate">Slate Grey</option>
+        <option value="light">Light</option>
+      </select>
+    </div>
+
+    <button id="reset-cam">Reset View</button>
   </div>
 
   <script type="importmap">
@@ -56,13 +152,11 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 
-    // 1. Scene & Camera Setup
+    // 1. Scene & Renderer Setup
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f1117);
+    scene.background = new THREE.Color(0x0d1117);
 
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 2000);
-    camera.position.set(0, 5, 10);
-
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 5000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -70,68 +164,91 @@
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-
-    // Optional subtle grid
-    const grid = new THREE.GridHelper(20, 20, 0x333e50, 0x1e2230);
-    grid.position.y = -1;
-    scene.add(grid);
+    controls.dampingFactor = 0.05;
+    controls.autoRotate = false;
+    controls.autoRotateSpeed = 1.0;
 
     let pointsMaterial = null;
+    let initialCameraPosition = new THREE.Vector3();
+    let initialTarget = new THREE.Vector3(0, 0, 0);
 
-    // 2. Load Agisoft PLY
+    // 2. Load Point Cloud
     const loader = new PLYLoader();
     loader.load(
       './cloud.ply',
       (geometry) => {
-        // Auto-center point cloud at (0, 0, 0)
+        // Center the cloud at local origin
         geometry.computeBoundingBox();
         geometry.center();
 
-        // Agisoft uses Z-up by default; rotate to match Three.js Y-up
+        // Agisoft uses Z-up; convert to Three.js Y-up
         geometry.rotateX(-Math.PI / 2);
 
-        // Check if colors exist, otherwise fallback to cyan
         const hasColors = geometry.hasAttribute('color');
 
         pointsMaterial = new THREE.PointsMaterial({
           size: 0.02,
           vertexColors: hasColors,
-          color: hasColors ? 0xffffff : 0x00e5ff,
+          color: hasColors ? 0xffffff : 0x58a6ff,
           sizeAttenuation: true
         });
 
         const pointCloud = new THREE.Points(geometry, pointsMaterial);
         scene.add(pointCloud);
 
-        // Adjust camera dynamically to frame the object
-        const box = geometry.boundingBox;
-        const size = box.getSize(new THREE.Vector3()).length();
-        camera.position.set(0, size * 0.5, size * 1.2);
-        camera.lookAt(0, 0, 0);
+        // Frame the object at an oblique 3D angle
+        geometry.computeBoundingSphere();
+        const sphere = geometry.boundingSphere;
+        const radius = sphere.radius || 10;
+        
+        // Position camera: elevated 45 degrees, viewing diagonally
+        camera.position.set(radius * 0.9, radius * 0.8, radius * 1.2);
         controls.target.set(0, 0, 0);
+        camera.lookAt(0, 0, 0);
         controls.update();
 
-        // Hide loading text
-        document.getElementById('loading').style.display = 'none';
+        // Save position for the Reset button
+        initialCameraPosition.copy(camera.position);
+
+        // Remove loader
+        document.getElementById('loading-container').style.display = 'none';
       },
       (xhr) => {
         const percent = Math.round((xhr.loaded / (xhr.total || 1)) * 100);
-        document.getElementById('loading').innerText = `Loading: ${percent}%`;
+        document.getElementById('loading-text').innerText = `Loading: ${percent}%`;
       },
       (err) => {
         console.error('Error loading PLY:', err);
-        document.getElementById('loading').innerText = 'Failed to load cloud.ply';
+        document.getElementById('loading-text').innerText = 'Failed to load cloud.ply';
+        document.querySelector('.spinner').style.display = 'none';
       }
     );
 
-    // 3. UI Point Size Slider
+    // 3. UI Event Listeners
     document.getElementById('size-slider').addEventListener('input', (e) => {
       if (pointsMaterial) {
         pointsMaterial.size = parseFloat(e.target.value);
       }
     });
 
-    // 4. Resize and Render Loop
+    document.getElementById('toggle-rotate').addEventListener('change', (e) => {
+      controls.autoRotate = e.target.checked;
+    });
+
+    document.getElementById('bg-select').addEventListener('change', (e) => {
+      const mode = e.target.value;
+      if (mode === 'dark') scene.background.setHex(0x0d1117);
+      else if (mode === 'slate') scene.background.setHex(0x21262d);
+      else if (mode === 'light') scene.background.setHex(0xe6edf3);
+    });
+
+    document.getElementById('reset-cam').addEventListener('click', () => {
+      camera.position.copy(initialCameraPosition);
+      controls.target.copy(initialTarget);
+      controls.update();
+    });
+
+    // 4. Resize and Animation Loop
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
